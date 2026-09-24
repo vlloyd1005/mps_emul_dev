@@ -1,0 +1,8 @@
+__pycache__/
+archive/
+halofit_baseline/
+metadata/
+models/
+out/
+symbolic_pofk/
+validation_figs/
