@@ -3829,6 +3829,24 @@ class PkEmulator:
         pk_nl_mpc_z = pk_nl_hmpc_z / h**3
         return pk_nl_mpc_z.astype(np.float32)
 
+    def _compute_syren_boost(self, params: np.ndarray) -> np.ndarray:
+        """B_syren(k,z) = P_nl_syren / P_lin_syren — the denominator used in training."""
+        As, ns, H0_in, Ob, Om, w0, w0wa = params[:7]
+        wa  = w0wa - w0
+        h   = H0_in / 100.0
+        mnu = float(params[8]) if len(params) > 7 else 0.06
+        k_hmpc = self.K_MODES / h
+        pk_lin_hmpc = plin_emulated(k_hmpc, Om, Ob, h, ns, As=As, w0=w0, wa=wa, mnu=mnu)
+        a_array = 1.0 / (self.Z_MODES + 1)
+        D0 = get_approximate_D(k=1e-4, As=As, Om=Om, Ob=Ob, h=h, ns=ns, mnu=mnu, w0=w0, wa=wa, a=1)
+        Dz = get_approximate_D(k=1e-4, As=As, Om=Om, Ob=Ob, h=h, ns=ns, mnu=mnu, w0=w0, wa=wa, a=a_array)
+        R0 = growth_correction_R(As=As, Om=Om, Ob=Ob, h=h, ns=ns, mnu=mnu, w0=w0, wa=wa, a=1)
+        Rz = growth_correction_R(As=As, Om=Om, Ob=Ob, h=h, ns=ns, mnu=mnu, w0=w0, wa=wa, a=a_array)
+        pk_lin_hmpc_z = pk_lin_hmpc[None, :] * ((Dz / D0) ** 2 * (Rz / R0))[:, None]
+        sigma8_z0 = As_to_sigma8(As, Om, Ob, h, ns, mnu=mnu, w0=w0, wa=wa)
+        return run_halofit_vec(k_hmpc, sigma8_z0, Om, Ob, h, ns, a_array,
+                               return_boost=True, Plin_in=pk_lin_hmpc_z).astype(np.float32)
+
     def _predict_fracs_all_z(self, params_norm: np.ndarray, params_raw: np.ndarray = None) -> np.ndarray:
         """
         NN inference: normalised params -> log-fractional differences for all z.
@@ -3876,6 +3894,7 @@ class PkEmulator:
         self,
         params: List[float],
         use_approximation_only: bool = False,
+        pk_lin=None,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Return P(k, z) for a single cosmology.
@@ -3920,8 +3939,11 @@ class PkEmulator:
         )
 
         if self.use_boost:
-            # Boost mode: base is the syren halofit NL prediction
-            pk_base = self._compute_syren_nl(params_array)
+            if pk_lin is None:
+                logging.warning("[PkEmulator] get_pks boost mode without pk_lin: "
+                                "using syren P_lin, result carries syren's linear error.")
+                pk_lin = self._compute_syren_lin(params_array)
+            pk_base = self._compute_syren_boost(params_array) * pk_lin
         else:
             # Linear mode: base is the syren linear prediction
             pk_base = self._compute_syren_lin(params_array)
@@ -4025,6 +4047,7 @@ def get_pks(
     use_approximation_only: bool = False,
     w0_min: Optional[float] = None,
     w0wa_max: Optional[float] = None,
+    pk_lin = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Convenience function: get P(k, z) without managing emulator instances.
@@ -4043,7 +4066,7 @@ def get_pks(
         w0_min=w0_min,
         w0wa_max=w0wa_max,
     )
-    return emulator.get_pks(params, use_approximation_only=use_approximation_only)
+    return emulator.get_pks(params, use_approximation_only=use_approximation_only,pk_lin=pk_lin)
 
 
 

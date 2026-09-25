@@ -409,11 +409,13 @@ def compute_predictions(test_set):
     true_pks_all  = test_set.pks_target    # (N, N_z, N_k) — full k-grid, no padding needed
     true_frac_all = test_set.frac_pks      # (N, N_z, N_k) — CAMB / syren_halofit residual
     approx_all    = test_set.mps_approxes_boost
+    pks_lin_all   = true_pks_all / (true_frac_all * approx_all)
     pred_list     = []
 
     n_params = test_set.lhs.shape[1]
 
-    for row in test_set.lhs:
+    # for row in test_set.lhs:
+    for row, plin in zip(test_set.lhs, pks_lin_all):
         # lhs stores [As, ns, H0, Ob, Om, w0, w0+wa, (mnu, T_AGN)]
         # get_pks in emulmps_w0wa.py expects wa in col 6, not w0+wa
         params_for_emu = row.copy()
@@ -429,6 +431,7 @@ def compute_predictions(test_set):
             w0_min                 = W0_MIN_FILTER,
             w0wa_max               = W0WA_MAX_FILTER,
             use_approximation_only = False,
+            pk_lin=plin,
         )
         pred_list.append(pk_full)
 
@@ -439,7 +442,7 @@ def compute_predictions(test_set):
         print(f"  WARNING: dropping {nan_mask.sum()} cosmologies with NaN output.")
 
     valid = ~nan_mask
-    pred_frac = pred_pks[valid] / approx_all[valid]
+    pred_frac = pred_pks[valid] / (approx_all[valid] * pks_lin_all[valid]) #pred_pks[valid] / approx_all[valid]
     return (
         pred_pks[valid],
         true_pks_all[valid],

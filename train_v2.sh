@@ -14,7 +14,7 @@
 #SBATCH --job-name=mps_train
 #SBATCH --output=/lustre/nvwulf/projects/MirandaGroup-nvwulf/victoria/cocoa/Cocoa/mps_emu/out/train_%x_%j.txt
 #SBATCH --time=48:00:00 #48:00:00
-#SBATCH --partition=h200x4-long #s-long #h200x4-long        # ← GPU partition
+#SBATCH --partition=h200x8-long #s-long #h200x4-long        # ← GPU partition
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=1              # ← request 1 GPU
