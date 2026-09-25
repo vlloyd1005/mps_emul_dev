@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=9
-#SBATCH --mem=256G # 100G
+#SBATCH --mem=150G # 100G
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=victoria.lloyd@stonybrook.edu
 
@@ -40,4 +40,4 @@ export TF_NUM_INTEROP_THREADS=1
 export TF_GPU_THREAD_MODE=gpu_private
 export TF_GPU_THREAD_COUNT=2
 
-python ./mps_emu/t_comp_val_nl_tagn.py
+python ./mps_emu/t_comp_val_nl.py

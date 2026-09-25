@@ -19,7 +19,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=1              # ← request 1 GPU
 #SBATCH --cpus-per-task=16             # ← enough for data loading workers
-#SBATCH --mem=250G
+#SBATCH --mem=700G
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=victoria.lloyd@stonybrook.edu
 

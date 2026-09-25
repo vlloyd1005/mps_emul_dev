@@ -53,8 +53,21 @@ PRIOR_TYPE  = "expanded"
 NL_TYPE     = "mead2020_Tfree_mnufree"
 
 W0_MIN      = None
-W0WA_MAX    = -0.4
-OM_MIN      = 0.24
+W0WA_MAX    = None
+OM_MIN      = None
+
+# Omega_b / H0 triangle cut. Must match --omegab_anchor / --h0_anchor used in training.
+OMEGAB_ANCHOR = 0.05
+H0_ANCHOR     = 75
+OMEGAB_H0_TRIANGLE_CUT = {
+    'omegab_anchor': OMEGAB_ANCHOR,
+    'h0_anchor':     H0_ANCHOR,
+    'omegab_max':    utils.OMEGA_B_MAX,
+    'h0_max':        utils.H0_MAX,
+}
+
+# Plot-time exclusion of |w0| < this value. None = no exclusion.
+PLOT_W0_ABS_MIN = None
 
 # Envelope correction settings
 N_TAGN_BINS = 20    # number of T_AGN bins for the envelope grid
@@ -63,8 +76,8 @@ TAGN_COL    = 7     # column index of T_AGN in lhs (after w0+wa overwrite)
 Z_IDX_0     = 0
 Z_IDX_3     = 33
 
-FIG_DIR     = "mps_emu/validation_figs/tfree_envelope"
-VER         = "0_tfree_envelope"
+FIG_DIR     = "mps_emu/validation_figs/smaller_grid"
+VER         = "0_smaller_grid"
 
 SCREE_Z_HIGHLIGHT = [0, 8, 16, 24, 33]
 
@@ -136,9 +149,10 @@ def _tag():
     if W0_MIN   is not None: parts.append(f"w0min{W0_MIN}")
     if W0WA_MAX is not None: parts.append(f"w0wamax{W0WA_MAX}")
     if OM_MIN   is not None: parts.append(f"ommin{OM_MIN}")
+    if OMEGAB_H0_TRIANGLE_CUT is not None:
+        parts.append(f"obh0tri{OMEGAB_ANCHOR}_{H0_ANCHOR}")
     fstr = ("_" + "_".join(parts)) if parts else ""
     return f"{COSMO_TYPE}_{NL_TYPE}_{PRIOR_TYPE}{fstr}_n{NUM_PCS}_z{NUM_PCS_Z}_v{VER}"
-
 
 # ---------------------------------------------------------------------------
 # Envelope fitting
@@ -708,11 +722,8 @@ def main():
     )
 
     # --- Cuts ---
-    n_removed = apply_filter(train_set, om_min=OM_MIN, w0_min=W0_MIN, w0wa_max=W0WA_MAX,
-                              omegab_h0_triangle_cut={
-                                  'omegab_anchor': 0.05, 'h0_anchor': 75,
-                                  'omegab_max': 0.072,   'h0_max': 90,
-                              })
+    n_removed = apply_filter(train_set, om_min=None, w0_min=None, w0wa_max=None,
+                             omegab_h0_triangle_cut=OMEGAB_H0_TRIANGLE_CUT)
     print(f"\n[INFO] Prior cuts: removed {n_removed} ({len(train_set.lhs)} remaining).")
 
     # --- Fit envelope ---
@@ -741,11 +752,8 @@ def main():
         nl_type     = NL_TYPE,
         start_batch = TEST_BATCH,
     )
-    apply_filter(test_set, om_min=OM_MIN, w0_min=W0_MIN, w0wa_max=W0WA_MAX,
-                 omegab_h0_triangle_cut={
-                     'omegab_anchor': 0.05, 'h0_anchor': 75,
-                     'omegab_max': 0.072,   'h0_max': 90,
-                 })
+    apply_filter(test_set, om_min=None, w0_min=None, w0wa_max=None,
+                 omegab_h0_triangle_cut=OMEGAB_H0_TRIANGLE_CUT)
     print(f"[INFO] Test set: {len(test_set.lhs)} cosmologies after cuts.")
 
     ks = train_set.ks
@@ -755,8 +763,8 @@ def main():
     pca_err_z0 = pca_reconstruction_errors_envelope(train_set, test_set, Z_IDX_0)
     pca_err_z3 = pca_reconstruction_errors_envelope(train_set, test_set, Z_IDX_3)
 
-    pca_err_z0_plot, _ = _exclude_outliers(pca_err_z0, test_set, w0_abs_min=0.15)
-    pca_err_z3_plot, _ = _exclude_outliers(pca_err_z3, test_set, w0_abs_min=0.15)
+    pca_err_z0_plot, _ = _exclude_outliers(pca_err_z0, test_set, w0_abs_min=PLOT_W0_ABS_MIN)
+    pca_err_z3_plot, _ = _exclude_outliers(pca_err_z3, test_set, w0_abs_min=PLOT_W0_ABS_MIN)
 
     print("\n  PCA error summary (envelope-corrected):")
     print_error_summary(pca_err_z0_plot, "PCA", iz_label=0)
@@ -768,8 +776,8 @@ def main():
     tpca_err_z0 = tpca_reconstruction_errors(stacks, test_set, Z_IDX_0)
     tpca_err_z3 = tpca_reconstruction_errors(stacks, test_set, Z_IDX_3)
 
-    tpca_err_z0_plot, _ = _exclude_outliers(tpca_err_z0, test_set, w0_abs_min=0.15)
-    tpca_err_z3_plot, _ = _exclude_outliers(tpca_err_z3, test_set, w0_abs_min=0.15)
+    tpca_err_z0_plot, _ = _exclude_outliers(tpca_err_z0, test_set, w0_abs_min=PLOT_W0_ABS_MIN)
+    tpca_err_z3_plot, _ = _exclude_outliers(tpca_err_z3, test_set, w0_abs_min=PLOT_W0_ABS_MIN)
 
     print("\n  tPCA error summary (envelope-corrected):")
     print_error_summary(tpca_err_z0_plot, "tPCA", iz_label=0)

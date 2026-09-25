@@ -55,16 +55,28 @@ from sklearn.decomposition import KernelPCA
 N_BATCHES   = 10
 START_BATCH = 0
 TEST_BATCH  = 1000
-NUM_PCS     = 25       # number of spatial PCA components per redshift
-NUM_PCS_Z   = 70       # number of temporal PCA components across redshifts
+NUM_PCS     = 23       # number of spatial PCA components per redshift
+NUM_PCS_Z   = 65       # number of temporal PCA components across redshifts
 COSMO_TYPE  = "w0wacdm"
 PRIOR_TYPE  = "expanded"
 NL_TYPE     = "mead2020_Tfree_mnufree" #"mead2020_Tfree_mnufree"   # nonlinear prescription: halofit, mead2020, etc.
 
-W0_MIN      = None     # set to match training filter, e.g. -2.0; None to disable
-W0WA_MAX    = -0.4     # set to match training filter, e.g. -0.4; None to disable
+W0_MIN      = None
+W0WA_MAX    = None
+OM_MIN      = None
 
-OM_MIN      = 0.24
+# Omega_b / H0 triangle cut. Must match --omegab_anchor / --h0_anchor used in training.
+OMEGAB_ANCHOR = 0.05
+H0_ANCHOR     = 75
+OMEGAB_H0_TRIANGLE_CUT = {
+    'omegab_anchor': OMEGAB_ANCHOR,
+    'h0_anchor':     H0_ANCHOR,
+    'omegab_max':    utils.OMEGA_B_MAX,
+    'h0_max':        utils.H0_MAX,
+}
+
+# Plot-time exclusion of |w0| < this value. None = no exclusion.
+PLOT_W0_ABS_MIN = None
 
 # NOTE: K_MIN truncation has been removed.  The syren halofit baseline
 # (P_nl_syren) is non-trivial at all k, so the residual frac_pks =
@@ -75,9 +87,9 @@ OM_MIN      = 0.24
 Z_IDX_0     = 0        # redshift index for z≈0
 Z_IDX_3     = 33       # redshift index for z≈3 (index into utils.z_mps)
 
-FIG_DIR     = "mps_emu/validation_figs/tfree_diagnostics"
+FIG_DIR     = "mps_emu/validation_figs/smaller_grid"
 
-VER         = "0_tfree_mufree"
+VER         = "0_smaller_grid"
 
 # Redshift indices whose spatial-PCA scree curves are highlighted individually.
 # All other redshifts are drawn as thin grey lines for context.
@@ -151,44 +163,28 @@ def print_data_diagnostics(train_set):
 # Filtering
 # ---------------------------------------------------------------------------
 
-def apply_filter(cola_set, om_min=OM_MIN, w0_min=W0_MIN, w0wa_max=W0WA_MAX, omegab_h0_triangle_cut=None):
-    """
-    Remove cosmologies outside the prior cuts from a COLASet in-place.
-
-    Mirrors the filter applied in evaluate_one_nl.load_test_set() so that
-    validation plots reflect the same population the trained model will see.
-
-    Parameters
-    ----------
-    cola_set : COLASet — modified in-place
-    w0_min   : float or None
-    w0wa_max : float or None
-
-    Returns
-    -------
-    n_removed : int
-    """
-    om_col   = utils.params.index("Omega_m")
-    w0_col   = utils.params.index("w")
-    w0wa_col = utils.params.index("w0+wa")
+def apply_filter(cola_set, om_min=OM_MIN, w0_min=W0_MIN, w0wa_max=W0WA_MAX,
+                 omegab_h0_triangle_cut=None):
+    om_col     = utils.params.index("Omega_m")
+    w0_col     = utils.params.index("w")
+    w0wa_col   = utils.params.index("w0+wa")
     omegab_col = utils.params.index("Omega_b")
     h_col      = utils.params.index("h")
-    mask     = np.ones(len(cola_set.lhs), dtype=bool)
+    mask       = np.ones(len(cola_set.lhs), dtype=bool)
 
     if om_min is not None:
         om_mask = cola_set.lhs[:, om_col] >= om_min
-        print(f"  Om cut   (Om >= {om_min}):        removed {(~om_mask).sum()} "
-              f"additional cosmologies")
+        print(f"  Om cut   (Om >= {om_min}): removed {(~om_mask).sum()}")
         mask &= om_mask
+
     if w0_min is not None:
         w0_mask = cola_set.lhs[:, w0_col] >= w0_min
-        print(f"  w0 cut   (w0 >= {w0_min}):       removed {(~w0_mask).sum()}")
+        print(f"  w0 cut   (w0 >= {w0_min}): removed {(~w0_mask & mask).sum()}")
         mask &= w0_mask
 
     if w0wa_max is not None:
         w0wa_mask = cola_set.lhs[:, w0wa_col] <= w0wa_max
-        print(f"  w0+wa cut (w0+wa <= {w0wa_max}): removed {(~w0wa_mask & mask).sum()} "
-              f"additional cosmologies")
+        print(f"  w0+wa cut (w0+wa <= {w0wa_max}): removed {(~w0wa_mask & mask).sum()}")
         mask &= w0wa_mask
 
     if omegab_h0_triangle_cut is not None:
@@ -196,36 +192,25 @@ def apply_filter(cola_set, om_min=OM_MIN, w0_min=W0_MIN, w0wa_max=W0WA_MAX, omeg
         h0_anchor = omegab_h0_triangle_cut['h0_anchor']
         ob_max    = omegab_h0_triangle_cut['omegab_max']
         h0_max    = omegab_h0_triangle_cut['h0_max']
-
         omegab_vals = cola_set.lhs[:, omegab_col]
         h0_vals     = cola_set.lhs[:, h_col]
-
-        # Line from (ob_anchor, h0_max) to (ob_max, h0_anchor)
-        slope = (h0_anchor - h0_max) / (ob_max - ob_anchor)
-        h0_line = h0_max + slope * (omegab_vals - ob_anchor)
-
-        triangle_mask = h0_vals <= h0_line   # keep on/below the line; cut above
-        n_cut_triangle = (~triangle_mask & mask).sum()
-        print(f"  Omega_b/H0 triangle cut: removed {n_cut_triangle} additional cosmologies "
-              f"(line from Omega_b={ob_anchor}, H0={h0_max} to Omega_b={ob_max}, H0={h0_anchor})")
-        mask &= triangle_mask
+        slope       = (h0_anchor - h0_max) / (ob_max - ob_anchor)
+        h0_line     = h0_max + slope * (omegab_vals - ob_anchor)
+        tri_mask    = h0_vals <= h0_line
+        print(f"  Omega_b/H0 triangle cut: removed {(~tri_mask & mask).sum()}")
+        mask &= tri_mask
 
     n_removed = int((~mask).sum())
-
     for attr in ("lhs", "pks_target", "frac_pks", "logfracs"):
-        if hasattr(cola_set, attr):
+        if hasattr(cola_set, attr) and getattr(cola_set, attr) is not None:
             setattr(cola_set, attr, getattr(cola_set, attr)[mask])
-
-    # Mask the syren NL baseline (boost mode) or linear baseline (lin mode)
-    if hasattr(cola_set, "mps_approxes_nl") and cola_set.mps_approxes_nl is not None:
-        cola_set.mps_approxes_nl = cola_set.mps_approxes_nl[mask]
-        cola_set.mps_approxes    = cola_set.mps_approxes_nl   # keep alias in sync
+    if hasattr(cola_set, "mps_approxes_boost") and cola_set.mps_approxes_boost is not None:
+        cola_set.mps_approxes_boost = cola_set.mps_approxes_boost[mask]
+        cola_set.mps_approxes       = cola_set.mps_approxes_boost
     elif hasattr(cola_set, "mps_approxes") and cola_set.mps_approxes is not None:
         cola_set.mps_approxes = cola_set.mps_approxes[mask]
-
     if hasattr(cola_set, "lhs_norm") and cola_set.lhs_norm is not None:
         cola_set.lhs_norm = cola_set.lhs_norm[mask]
-
     return n_removed
 
 def _exclude_outliers(errors, test_set, w0_abs_min=None, extra_mask=None):
@@ -801,12 +786,11 @@ def plot_scree(train_set):
 def _tag():
     """Shared filename tag built from the run configuration."""
     filter_parts = []
-    if W0_MIN   is not None:
-        filter_parts.append(f"w0min{W0_MIN}")
-    if W0WA_MAX is not None:
-        filter_parts.append(f"w0wamax{W0WA_MAX}")
-    if OM_MIN   is not None:
-        filter_parts.append(f"ommin{OM_MIN}")
+    if W0_MIN   is not None: filter_parts.append(f"w0min{W0_MIN}")
+    if W0WA_MAX is not None: filter_parts.append(f"w0wamax{W0WA_MAX}")
+    if OM_MIN   is not None: filter_parts.append(f"ommin{OM_MIN}")
+    if OMEGAB_H0_TRIANGLE_CUT is not None:
+        filter_parts.append(f"obh0tri{OMEGAB_ANCHOR}_{H0_ANCHOR}")
     filter_str = ("_" + "_".join(filter_parts)) if filter_parts else ""
     return (f"{COSMO_TYPE}_{NL_TYPE}_{PRIOR_TYPE}{filter_str}"
             f"_n{NUM_PCS}_z{NUM_PCS_Z}_v{VER}")
@@ -878,160 +862,160 @@ def plot_tpca_errors(errors, ks, iz_label):
 from scipy.optimize import curve_fit
 from scipy.interpolate import RegularGridInterpolator
 
-def fit_mean_logfrac_envelope(cola_set, iz, n_tagn_bins=20):
-    """
-    Fit a smooth T_AGN-dependent mean logfrac envelope across k at redshift iz.
+# def fit_mean_logfrac_envelope(cola_set, iz, n_tagn_bins=20):
+#     """
+#     Fit a smooth T_AGN-dependent mean logfrac envelope across k at redshift iz.
 
-    The idea: the baryonic feedback signal (exponential rise at high k driven
-    by T_AGN) is shared across cosmologies in a structured way. Subtracting
-    a smooth fit to the mean logfrac as a function of (k, T_AGN) before PCA
-    leaves residuals that are smaller and more compact — the PCA can then
-    use its components for genuine cosmology-to-cosmology variation rather
-    than representing the shared feedback envelope.
+#     The idea: the baryonic feedback signal (exponential rise at high k driven
+#     by T_AGN) is shared across cosmologies in a structured way. Subtracting
+#     a smooth fit to the mean logfrac as a function of (k, T_AGN) before PCA
+#     leaves residuals that are smaller and more compact — the PCA can then
+#     use its components for genuine cosmology-to-cosmology variation rather
+#     than representing the shared feedback envelope.
 
-    Parameters
-    ----------
-    cola_set : COLASet — must have lhs[:, 7] = T_AGN (9-column dataset)
-    iz       : int     — redshift index
-    n_tagn_bins : int  — number of T_AGN bins for the envelope grid
+#     Parameters
+#     ----------
+#     cola_set : COLASet — must have lhs[:, 7] = T_AGN (9-column dataset)
+#     iz       : int     — redshift index
+#     n_tagn_bins : int  — number of T_AGN bins for the envelope grid
 
-    Returns
-    -------
-    envelope_fn   : callable(tagn, k) → logfrac_envelope, shape matching inputs
-    tagn_grid     : (n_tagn_bins,) T_AGN values used for the grid
-    mean_logfracs : (n_tagn_bins, N_k) mean logfrac in each T_AGN bin
-    """
-    if cola_set.lhs.shape[1] <= 7:
-        raise ValueError("fit_mean_logfrac_envelope requires 9-column lhs (T_AGN at col 7)")
+#     Returns
+#     -------
+#     envelope_fn   : callable(tagn, k) → logfrac_envelope, shape matching inputs
+#     tagn_grid     : (n_tagn_bins,) T_AGN values used for the grid
+#     mean_logfracs : (n_tagn_bins, N_k) mean logfrac in each T_AGN bin
+#     """
+#     if cola_set.lhs.shape[1] <= 7:
+#         raise ValueError("fit_mean_logfrac_envelope requires 9-column lhs (T_AGN at col 7)")
 
-    tagn_col   = 7   # T_AGN column index in lhs (after w0+wa overwrite)
-    tagn_vals  = cola_set.lhs[:, tagn_col]
-    logfracs_z = cola_set.logfracs[:, iz, :]   # (N_cosmo, N_k)
-    ks         = cola_set.ks
+#     tagn_col   = 7   # T_AGN column index in lhs (after w0+wa overwrite)
+#     tagn_vals  = cola_set.lhs[:, tagn_col]
+#     logfracs_z = cola_set.logfracs[:, iz, :]   # (N_cosmo, N_k)
+#     ks         = cola_set.ks
 
-    # Bin by T_AGN and compute mean logfrac in each bin
-    tagn_edges = np.linspace(tagn_vals.min(), tagn_vals.max(), n_tagn_bins + 1)
-    tagn_grid  = 0.5 * (tagn_edges[:-1] + tagn_edges[1:])
-    mean_logfracs = np.zeros((n_tagn_bins, len(ks)))
+#     # Bin by T_AGN and compute mean logfrac in each bin
+#     tagn_edges = np.linspace(tagn_vals.min(), tagn_vals.max(), n_tagn_bins + 1)
+#     tagn_grid  = 0.5 * (tagn_edges[:-1] + tagn_edges[1:])
+#     mean_logfracs = np.zeros((n_tagn_bins, len(ks)))
 
-    for b in range(n_tagn_bins):
-        in_bin = (tagn_vals >= tagn_edges[b]) & (tagn_vals < tagn_edges[b + 1])
-        if in_bin.sum() == 0:
-            # Empty bin — interpolate later
-            mean_logfracs[b] = np.nan
-        else:
-            # Use median rather than mean to be robust to outliers
-            mean_logfracs[b] = np.median(logfracs_z[in_bin], axis=0)
+#     for b in range(n_tagn_bins):
+#         in_bin = (tagn_vals >= tagn_edges[b]) & (tagn_vals < tagn_edges[b + 1])
+#         if in_bin.sum() == 0:
+#             # Empty bin — interpolate later
+#             mean_logfracs[b] = np.nan
+#         else:
+#             # Use median rather than mean to be robust to outliers
+#             mean_logfracs[b] = np.median(logfracs_z[in_bin], axis=0)
 
-    # Fill any empty bins by linear interpolation across T_AGN
-    for k_idx in range(len(ks)):
-        col = mean_logfracs[:, k_idx]
-        nan_mask = np.isnan(col)
-        if nan_mask.any() and (~nan_mask).sum() >= 2:
-            mean_logfracs[nan_mask, k_idx] = np.interp(
-                tagn_grid[nan_mask], tagn_grid[~nan_mask], col[~nan_mask]
-            )
+#     # Fill any empty bins by linear interpolation across T_AGN
+#     for k_idx in range(len(ks)):
+#         col = mean_logfracs[:, k_idx]
+#         nan_mask = np.isnan(col)
+#         if nan_mask.any() and (~nan_mask).sum() >= 2:
+#             mean_logfracs[nan_mask, k_idx] = np.interp(
+#                 tagn_grid[nan_mask], tagn_grid[~nan_mask], col[~nan_mask]
+#             )
 
-    # Build a 2D interpolator: envelope_fn(tagn_scalar, k_array) → logfrac_array
-    # Use RegularGridInterpolator for fast vectorized evaluation at inference
-    envelope_fn = RegularGridInterpolator(
-        (tagn_grid, ks),
-        mean_logfracs,
-        method='linear',
-        bounds_error=False,
-        fill_value=None,   # extrapolate at edges
-    )
+#     # Build a 2D interpolator: envelope_fn(tagn_scalar, k_array) → logfrac_array
+#     # Use RegularGridInterpolator for fast vectorized evaluation at inference
+#     envelope_fn = RegularGridInterpolator(
+#         (tagn_grid, ks),
+#         mean_logfracs,
+#         method='linear',
+#         bounds_error=False,
+#         fill_value=None,   # extrapolate at edges
+#     )
 
-    return envelope_fn, tagn_grid, mean_logfracs
+#     return envelope_fn, tagn_grid, mean_logfracs
 
 
-def plot_logfrac_envelope_diagnostic(cola_set, ks, iz, iz_label,
-                                      envelope_fn, tagn_grid, mean_logfracs):
-    """
-    Diagnostic: show the fitted T_AGN envelope and the residuals after subtracting it.
-    Two rows:
-      Top:    mean logfrac per T_AGN bin (the envelope being subtracted)
-      Bottom: logfrac residuals after envelope subtraction for a random subset
-    """
-    if cola_set.lhs.shape[1] <= 7:
-        print("  [SKIP] plot_logfrac_envelope_diagnostic requires 9-column lhs")
-        return
+# def plot_logfrac_envelope_diagnostic(cola_set, ks, iz, iz_label,
+#                                       envelope_fn, tagn_grid, mean_logfracs):
+#     """
+#     Diagnostic: show the fitted T_AGN envelope and the residuals after subtracting it.
+#     Two rows:
+#       Top:    mean logfrac per T_AGN bin (the envelope being subtracted)
+#       Bottom: logfrac residuals after envelope subtraction for a random subset
+#     """
+#     if cola_set.lhs.shape[1] <= 7:
+#         print("  [SKIP] plot_logfrac_envelope_diagnostic requires 9-column lhs")
+#         return
 
-    tagn_col   = 7
-    tagn_vals  = cola_set.lhs[:, tagn_col]
-    logfracs_z = cola_set.logfracs[:, iz, :]
+#     tagn_col   = 7
+#     tagn_vals  = cola_set.lhs[:, tagn_col]
+#     logfracs_z = cola_set.logfracs[:, iz, :]
 
-    # Compute residuals for all cosmologies
-    query_pts = np.column_stack([tagn_vals,
-                                  np.zeros(len(tagn_vals))])   # placeholder k
-    residuals = np.empty_like(logfracs_z)
-    for i, (tagn_i, logfrac_i) in enumerate(zip(tagn_vals, logfracs_z)):
-        pts = np.column_stack([np.full(len(ks), tagn_i), ks])
-        envelope_i = envelope_fn(pts)
-        residuals[i] = logfrac_i - envelope_i
+#     # Compute residuals for all cosmologies
+#     query_pts = np.column_stack([tagn_vals,
+#                                   np.zeros(len(tagn_vals))])   # placeholder k
+#     residuals = np.empty_like(logfracs_z)
+#     for i, (tagn_i, logfrac_i) in enumerate(zip(tagn_vals, logfracs_z)):
+#         pts = np.column_stack([np.full(len(ks), tagn_i), ks])
+#         envelope_i = envelope_fn(pts)
+#         residuals[i] = logfrac_i - envelope_i
 
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+#     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
-    # Left: the envelope itself, coloured by T_AGN
-    ax = axes[0]
-    cmap_e = plt.get_cmap("plasma")
-    norm_e = Normalize(vmin=tagn_grid.min(), vmax=tagn_grid.max())
-    for b, tagn_b in enumerate(tagn_grid):
-        color = cmap_e(norm_e(tagn_b))
-        ax.semilogx(ks, mean_logfracs[b], color=color, lw=1.2)
-    ax.axhline(0, color="k", lw=0.8, ls="--", alpha=0.5)
-    sm_e = plt.cm.ScalarMappable(cmap=cmap_e, norm=norm_e)
-    sm_e.set_array([])
-    plt.colorbar(sm_e, ax=ax, label=r"$\log T_{\rm AGN}$")
-    ax.set_xlabel(r"$k \; [1/\mathrm{Mpc}]$", fontsize=AXES_FS)
-    ax.set_ylabel(r"Mean $\log(P_{\rm CAMB}/P_{\rm syren})$", fontsize=AXES_FS)
-    ax.set_title(fr"Fitted $T_{{AGN}}$ envelope at $z\approx{iz_label}$", fontsize=AXES_FS)
-    ax.grid(alpha=0.3)
-    ax.tick_params(labelsize=TICK_FS)
+#     # Left: the envelope itself, coloured by T_AGN
+#     ax = axes[0]
+#     cmap_e = plt.get_cmap("plasma")
+#     norm_e = Normalize(vmin=tagn_grid.min(), vmax=tagn_grid.max())
+#     for b, tagn_b in enumerate(tagn_grid):
+#         color = cmap_e(norm_e(tagn_b))
+#         ax.semilogx(ks, mean_logfracs[b], color=color, lw=1.2)
+#     ax.axhline(0, color="k", lw=0.8, ls="--", alpha=0.5)
+#     sm_e = plt.cm.ScalarMappable(cmap=cmap_e, norm=norm_e)
+#     sm_e.set_array([])
+#     plt.colorbar(sm_e, ax=ax, label=r"$\log T_{\rm AGN}$")
+#     ax.set_xlabel(r"$k \; [1/\mathrm{Mpc}]$", fontsize=AXES_FS)
+#     ax.set_ylabel(r"Mean $\log(P_{\rm CAMB}/P_{\rm syren})$", fontsize=AXES_FS)
+#     ax.set_title(fr"Fitted $T_{{AGN}}$ envelope at $z\approx{iz_label}$", fontsize=AXES_FS)
+#     ax.grid(alpha=0.3)
+#     ax.tick_params(labelsize=TICK_FS)
 
-    # Right: residuals after subtracting the envelope, random subset
-    ax2 = axes[1]
-    rng = np.random.default_rng(seed=42)
-    sub_idx = rng.choice(len(cola_set.lhs), size=min(100, len(cola_set.lhs)), replace=False)
-    w0wa_col = utils.params.index("w0+wa")
-    w0wa_vals = cola_set.lhs[sub_idx, w0wa_col]
-    cmap_r = plt.get_cmap("coolwarm")
-    norm_r = Normalize(vmin=np.percentile(w0wa_vals, 2),
-                       vmax=np.percentile(w0wa_vals, 98))
-    for i, (idx_i, wi) in enumerate(zip(sub_idx, w0wa_vals)):
-        color = cmap_r(norm_r(wi))
-        ax2.semilogx(ks, residuals[idx_i], color=color, lw=0.5, alpha=0.5, rasterized=True)
-    ax2.axhline(0, color="k", lw=0.8, ls="--")
+#     # Right: residuals after subtracting the envelope, random subset
+#     ax2 = axes[1]
+#     rng = np.random.default_rng(seed=42)
+#     sub_idx = rng.choice(len(cola_set.lhs), size=min(100, len(cola_set.lhs)), replace=False)
+#     w0wa_col = utils.params.index("w0+wa")
+#     w0wa_vals = cola_set.lhs[sub_idx, w0wa_col]
+#     cmap_r = plt.get_cmap("coolwarm")
+#     norm_r = Normalize(vmin=np.percentile(w0wa_vals, 2),
+#                        vmax=np.percentile(w0wa_vals, 98))
+#     for i, (idx_i, wi) in enumerate(zip(sub_idx, w0wa_vals)):
+#         color = cmap_r(norm_r(wi))
+#         ax2.semilogx(ks, residuals[idx_i], color=color, lw=0.5, alpha=0.5, rasterized=True)
+#     ax2.axhline(0, color="k", lw=0.8, ls="--")
 
-    # Print residual stats vs original logfrac stats
-    orig_std  = np.abs(logfracs_z).max(axis=1).mean()
-    resid_std = np.abs(residuals).max(axis=1).mean()
-    print(f"\n  Envelope subtraction at z~{iz_label}:")
-    print(f"    Mean max |logfrac| before: {orig_std:.4f}")
-    print(f"    Mean max |residual| after: {resid_std:.4f}  "
-          f"({100*(1 - resid_std/orig_std):.1f}% reduction)")
+#     # Print residual stats vs original logfrac stats
+#     orig_std  = np.abs(logfracs_z).max(axis=1).mean()
+#     resid_std = np.abs(residuals).max(axis=1).mean()
+#     print(f"\n  Envelope subtraction at z~{iz_label}:")
+#     print(f"    Mean max |logfrac| before: {orig_std:.4f}")
+#     print(f"    Mean max |residual| after: {resid_std:.4f}  "
+#           f"({100*(1 - resid_std/orig_std):.1f}% reduction)")
 
-    sm_r = plt.cm.ScalarMappable(cmap=cmap_r, norm=norm_r)
-    sm_r.set_array([])
-    plt.colorbar(sm_r, ax=ax2, label=r"$w_0 + w_a$")
-    ax2.set_xlabel(r"$k \; [1/\mathrm{Mpc}]$", fontsize=AXES_FS)
-    ax2.set_ylabel(r"Residual logfrac after envelope subtraction", fontsize=AXES_FS)
-    ax2.set_title(fr"Residuals at $z\approx{iz_label}$ (coloured by $w_0+w_a$)",
-                  fontsize=AXES_FS)
-    ax2.grid(alpha=0.3)
-    ax2.tick_params(labelsize=TICK_FS)
+#     sm_r = plt.cm.ScalarMappable(cmap=cmap_r, norm=norm_r)
+#     sm_r.set_array([])
+#     plt.colorbar(sm_r, ax=ax2, label=r"$w_0 + w_a$")
+#     ax2.set_xlabel(r"$k \; [1/\mathrm{Mpc}]$", fontsize=AXES_FS)
+#     ax2.set_ylabel(r"Residual logfrac after envelope subtraction", fontsize=AXES_FS)
+#     ax2.set_title(fr"Residuals at $z\approx{iz_label}$ (coloured by $w_0+w_a$)",
+#                   fontsize=AXES_FS)
+#     ax2.grid(alpha=0.3)
+#     ax2.tick_params(labelsize=TICK_FS)
 
-    plt.suptitle(
-        f"T_AGN envelope correction — {COSMO_TYPE} / {NL_TYPE} / {PRIOR_TYPE}\n"
-        f"({N_BATCHES} batches, z_idx={iz})",
-        fontsize=AXES_FS, y=1.01
-    )
-    plt.tight_layout()
-    fname = (f"{FIG_DIR}/envelope_diagnostic_z{iz_label}_"
-             f"{COSMO_TYPE}_{NL_TYPE}_{PRIOR_TYPE}_v{VER}.pdf")
-    plt.savefig(fname, bbox_inches="tight", dpi=150)
-    plt.close()
-    print(f"  Saved: {fname}")
+#     plt.suptitle(
+#         f"T_AGN envelope correction — {COSMO_TYPE} / {NL_TYPE} / {PRIOR_TYPE}\n"
+#         f"({N_BATCHES} batches, z_idx={iz})",
+#         fontsize=AXES_FS, y=1.01
+#     )
+#     plt.tight_layout()
+#     fname = (f"{FIG_DIR}/envelope_diagnostic_z{iz_label}_"
+#              f"{COSMO_TYPE}_{NL_TYPE}_{PRIOR_TYPE}_v{VER}.pdf")
+#     plt.savefig(fname, bbox_inches="tight", dpi=150)
+#     plt.close()
+#     print(f"  Saved: {fname}")
 
 def plot_syren_vs_camb(cola_set, ks, iz, iz_label, n_cosmo=100, label="precut"):
     """
@@ -1211,9 +1195,9 @@ def main():
     print(f"       test_batch  = {TEST_BATCH}")
     print(f"       num_pcs     = {NUM_PCS}")
     print(f"       num_pcs_z   = {NUM_PCS_Z}")
-    print(f"       W0_MIN      = {W0_MIN}")
-    print(f"       W0WA_MAX    = {W0WA_MAX}")
-    print(f"       k grid      = full (500 modes, no truncation)")
+    print(f"       Omega_b/H0 cut = anchor ({OMEGAB_ANCHOR}, {H0_ANCHOR}), "
+          f"max ({utils.OMEGA_B_MAX}, {utils.H0_MAX})")
+    print(f"       k grid      = {len(utils.ks)} modes")
     print("=" * 60)
 
     # --- Load training set ---
@@ -1234,12 +1218,8 @@ def main():
     plot_syren_vs_camb(train_set, ks=train_set.ks, iz=Z_IDX_3, iz_label=3)
 
     # --- Prior cuts (must happen before prepare() fits the PCA) ---
-    n_removed = apply_filter(train_set, om_min=OM_MIN, w0_min=W0_MIN, w0wa_max=W0WA_MAX, omegab_h0_triangle_cut={
-        'omegab_anchor': 0.05,
-        'h0_anchor':     75,
-        'omegab_max':    0.072,   # confirm against your actual prior's Omega_b upper bound
-        'h0_max':        90,     # confirm against your actual prior's H0 upper bound
-    })
+    n_removed = apply_filter(train_set, om_min=None, w0_min=None, w0wa_max=None,
+                            omegab_h0_triangle_cut=OMEGAB_H0_TRIANGLE_CUT)
     print(f"\n[INFO] Prior cuts: removed {n_removed} cosmologies "
           f"({len(train_set.lhs)} remaining).")
 
@@ -1247,21 +1227,21 @@ def main():
     plot_syren_vs_camb(train_set, ks=train_set.ks, iz=Z_IDX_0, iz_label=0, label=_tag())
     plot_syren_vs_camb(train_set, ks=train_set.ks, iz=Z_IDX_3, iz_label=3, label=_tag())
 
-    if train_set.lhs.shape[1] > 7:
-        print("\n[INFO] Fitting T_AGN logfrac envelope...")
-        envelope_fn_z0, tagn_grid, mean_lf_z0 = fit_mean_logfrac_envelope(
-            train_set, iz=Z_IDX_0)
-        envelope_fn_z3, _, mean_lf_z3 = fit_mean_logfrac_envelope(
-            train_set, iz=Z_IDX_3)
+    # if train_set.lhs.shape[1] > 7:
+    #     print("\n[INFO] Fitting T_AGN logfrac envelope...")
+    #     envelope_fn_z0, tagn_grid, mean_lf_z0 = fit_mean_logfrac_envelope(
+    #         train_set, iz=Z_IDX_0)
+    #     envelope_fn_z3, _, mean_lf_z3 = fit_mean_logfrac_envelope(
+    #         train_set, iz=Z_IDX_3)
 
-        plot_logfrac_envelope_diagnostic(
-            train_set, train_set.ks, Z_IDX_0, iz_label=0,
-            envelope_fn=envelope_fn_z0, tagn_grid=tagn_grid,
-            mean_logfracs=mean_lf_z0)
-        plot_logfrac_envelope_diagnostic(
-            train_set, train_set.ks, Z_IDX_3, iz_label=3,
-            envelope_fn=envelope_fn_z3, tagn_grid=tagn_grid,
-            mean_logfracs=mean_lf_z3)
+    #     plot_logfrac_envelope_diagnostic(
+    #         train_set, train_set.ks, Z_IDX_0, iz_label=0,
+    #         envelope_fn=envelope_fn_z0, tagn_grid=tagn_grid,
+    #         mean_logfracs=mean_lf_z0)
+    #     plot_logfrac_envelope_diagnostic(
+    #         train_set, train_set.ks, Z_IDX_3, iz_label=3,
+    #         envelope_fn=envelope_fn_z3, tagn_grid=tagn_grid,
+    #         mean_logfracs=mean_lf_z3)
 
     # --- Regime boundary (uses full k-grid logfracs) ---
     print("\n[INFO] Visualising residual regime boundary...")
@@ -1284,12 +1264,8 @@ def main():
         nl_type     = NL_TYPE,
         start_batch = TEST_BATCH,
     )
-    n_removed_test = apply_filter(test_set, om_min=OM_MIN, w0_min=W0_MIN, w0wa_max=W0WA_MAX, omegab_h0_triangle_cut={
-        'omegab_anchor': 0.05,
-        'h0_anchor':     75,
-        'omegab_max':    0.072,   # confirm against your actual prior's Omega_b upper bound
-        'h0_max':        90,     # confirm against your actual prior's H0 upper bound
-    })
+    n_removed_test = apply_filter(test_set, om_min=None, w0_min=None, w0wa_max=None,
+                                  omegab_h0_triangle_cut=OMEGAB_H0_TRIANGLE_CUT)
     print(f"[INFO] Prior cuts: removed {n_removed_test} cosmologies "
           f"from test set ({len(test_set.lhs)} remaining).")
 
@@ -1316,8 +1292,8 @@ def main():
         ~np.isfinite(test_set.logfracs[i]).all())
     print("frac_pks range:", test_set.frac_pks[i, Z_IDX_0, :].min(), test_set.frac_pks[i, Z_IDX_0, :].max())
 
-    pca_err_z0_plot, keep_mask = _exclude_outliers(pca_err_z0, test_set, w0_abs_min=0.15)
-    pca_err_z3_plot, _         = _exclude_outliers(pca_err_z3, test_set, w0_abs_min=0.15)
+    pca_err_z0_plot, keep_mask = _exclude_outliers(pca_err_z0, test_set, w0_abs_min=PLOT_W0_ABS_MIN)
+    pca_err_z3_plot, _         = _exclude_outliers(pca_err_z3, test_set, w0_abs_min=PLOT_W0_ABS_MIN)
 
 
     print("\n  PCA error summary:")

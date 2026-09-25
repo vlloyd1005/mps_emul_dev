@@ -36,8 +36,8 @@ import matplotlib.patches as mpatches
 from scipy.interpolate import interp1d
 
 import emulmps_w0wa as pk_emu
-import train_utils_pk_emulator_v5 as utils
-from train_utils_pk_emulator_v5 import VER
+import train_utils_pk_emulator_v3 as utils
+from train_utils_pk_emulator_v3 import VER
 
 # import sys; sys.path.insert(0, "/lustre/nvwulf/projects/MirandaGroup-nvwulf/victoria/cocoa/Cocoa/mps_emulator_train/symbolic_pofk"); import symbolic_pofk.linear_VL as linear
 # import sys; sys.path.insert(0, "/lustre/nvwulf/projects/MirandaGroup-nvwulf/victoria/cocoa/Cocoa/mps_emulator_train/symbolic_pofk"); from symbolic_pofk.linear_VL import plin_emulated, get_approximate_D, growth_correction_R, get_eisensteinhu_nw
@@ -50,7 +50,7 @@ from train_utils_pk_emulator_v5 import VER
 # ---------------------------------------------------------------------------
 
 START_BATCH    = 1000        # batch index used as the test/validation set
-N_TRAIN        = 20         # number of training batches for the model being evaluated
+N_TRAIN        = 100         # number of training batches for the model being evaluated
 COSMO_TYPE     = "w0wacdm"
 NL_TYPE        = "mead2020_Tfree_mnufree"  # must be a nonlinear nl_type: halofit, mead2020, etc.
 PRIOR_TYPE     = "expanded"
@@ -78,7 +78,7 @@ W0WA_THRESHOLD  = -0.75
 W0_COL          = utils.params.index("w")
 W0WA_COL        = utils.params.index("w0+wa")
 
-FIG_DIR = "mps_emu/validation_figs/pca_exploration"
+FIG_DIR = "mps_emu/validation_figs/smaller_grid"
 
 K_WINDOW_LO, K_WINDOW_HI = 20.0, 30.0
 K_WINDOW_MASK = (utils.ks >= K_WINDOW_LO) & (utils.ks <= K_WINDOW_HI)

@@ -3296,15 +3296,15 @@ class PkEmulator:
     Column 6 is w0+wa (not wa).  wa is derived internally as w0wa - w0.
     """
 
-    N_K_MODES = 500
+    # ks_lin = np.logspace(-5.1, 2, 500)          # original grid (must match the saved files)
+    # kmin, kmax = 0.005, 50.0
+    # k_mask = (ks_lin >= kmin) & (ks_lin <= kmax)
+    # K_MODES = ks_lin[k_mask]
+    K_MODES = utils.ks
+    N_K_MODES = len(K_MODES) 
 
-    K_MODES = np.logspace(-5.1, 2, N_K_MODES)
-    Z_MODES = np.concatenate((
-        np.linspace(0,  3,  33, endpoint=False),
-        np.linspace(3,  10,  7, endpoint=False),
-        np.linspace(10, 50, 12),
-    ))
-    N_ZS = len(Z_MODES)
+    Z_MODES = np.asarray(utils.z_mps)
+    N_ZS    = len(Z_MODES)
 
     def __init__(
         self,
