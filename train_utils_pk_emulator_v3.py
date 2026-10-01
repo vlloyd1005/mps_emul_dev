@@ -58,13 +58,13 @@ params_latex_tfree_mnufree = params_latex + [r'$\log T_{\rm AGN}$', r'$m_\nu$']
 DEFAULT_MNU = 0.06
 
 #k=1e-5 to 1e2 (with 500 steps in log space)
-ks_lin = np.logspace(-5.1, 2, 500)
-ks_lin = np.logspace(-5.1, 2, 500)          # original grid (must match the saved files)
+ks = np.logspace(-5.1, 2, 500)
+# ks_lin = np.logspace(-5.1, 2, 500)          # original grid (must match the saved files)
 
-kmin, kmax = 0.005, 50.0
-k_mask = (ks_lin >= kmin) & (ks_lin <= kmax)
+# kmin, kmax = 0.005, 50.0
+# k_mask = (ks_lin >= kmin) & (ks_lin <= kmax)
 
-ks = ks_lin[k_mask]    
+# ks = ks_lin[k_mask]    
 # Boost truncation: the NL/LIN boost is ~1 (log~0) for k < 1e-2, so training
 # on that region wastes PCA modes and network capacity.  In boost mode we
 # truncate to k >= BOOST_K_MIN and pad with 1.0 at inference time.
@@ -82,8 +82,8 @@ ks_boost     = ks
 
 z1_mps = np.linspace(0,3,33,endpoint=False)
 z2_mps = np.linspace(3,10,7,endpoint=False)
-#z3_mps = np.linspace(10,50,12)
-z_mps = np.concatenate((z1_mps, z2_mps), axis=0) #, z3_mps
+z3_mps = np.linspace(10,50,12)
+z_mps = np.concatenate((z1_mps, z2_mps, z3_mps), axis=0) #, z3_mps
 
 H0_MAX = 90
 OMEGA_B_MAX = 0.072
@@ -355,10 +355,10 @@ def load_set(
     inputs_all, outputs_all = [], []
 
     for b in tqdm(range(start_batch, start_batch + n_batches), desc="Loading batches", unit="batch"):
-        # input_path, output_path = _make_file_paths(base_path, cosmo_type, prior_type, nl_type, b)
-        if "lin" in nl_type: output_path = "/lustre/nvwulf/home/vlloyd/pklins_large_hypersphere_R1.3.npy"
-        else: output_path = "/lustre/nvwulf/home/vlloyd/pknls_large_hypersphere_R1.3.npy"
-        input_path = "/lustre/nvwulf/home/vlloyd/cosmos_large_hypersphere_R1.3.npy"
+        input_path, output_path = _make_file_paths(base_path, cosmo_type, prior_type, nl_type, b)
+        # if "lin" in nl_type: output_path = "/lustre/nvwulf/home/vlloyd/pklins_large_hypersphere_R1.3.npy"
+        # else: output_path = "/lustre/nvwulf/home/vlloyd/pknls_large_hypersphere_R1.3.npy"
+        # input_path = "/lustre/nvwulf/home/vlloyd/cosmos_large_hypersphere_R1.3.npy"
         if not (os.path.exists(input_path) and os.path.exists(output_path)):
             if verbose:
                 print(f"⚠️  Skipping missing batch {b}  (prior='{prior_type}', nl_type='{nl_type}')")
@@ -367,7 +367,7 @@ def load_set(
             continue
 
         x = np.load(input_path,  mmap_mode="r")
-        y = np.load(output_path, mmap_mode="r").astype(np.float32, copy=False)[..., k_mask]
+        y = np.load(output_path, mmap_mode="r").astype(np.float32, copy=False)#[..., k_mask]
         if z_indices is not None:
             y = y[:, z_indices, :]
         if check_unphysical:

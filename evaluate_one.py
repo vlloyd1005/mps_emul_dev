@@ -39,10 +39,10 @@ VER = utils.VER
 # Run configuration
 # ---------------------------------------------------------------------------
 
-START_BATCH    = 100        # batch index used as the test/validation set
-N_TRAIN        = 50        # number of training batches for the model being evaluated
+START_BATCH    = 1000        # batch index used as the test/validation set
+N_TRAIN        = 100        # number of training batches for the model being evaluated
 COSMO_TYPE     = "w0wacdm"
-NL_TYPE        = "lin"
+NL_TYPE        = "mead2020_Tfree_mnufree_lin"
 PRIOR_TYPE     = "expanded"
 MODEL_TYPE     = "npce"      # "mlp" or "npce" — must match training
 
@@ -70,7 +70,7 @@ W0WA_THRESHOLD  = -0.75
 W0_COL          = utils.params.index("w")
 W0WA_COL        = utils.params.index("w0+wa")
 
-FIG_DIR         = "mps_emu/validation_figs"
+FIG_DIR         = "mps_emu/validation_figs/smaller_grid"
 
 # Path to single-cosmology datagenerator reference, relative to this file
 DG_PK_PATH = os.path.join(
@@ -343,7 +343,7 @@ def plot_comparison_bands(errors, errors_filt, errors_syren, errors_syren_filt, 
         ax.set_xlabel(r"$k \; [1/\mathrm{Mpc}]$", fontsize=AXES_FS)
         ax.legend(handles=[HANDLE_50, HANDLE_90, HANDLE_95],
                   fontsize=LEGEND_FS, loc="lower right")
-        ax.set_ylim(-0.07, 0.07)
+        # ax.set_ylim(-0.07, 0.07)
         plt.tight_layout()
         fname = (f"{FIG_DIR}/{name}_errors_z{z_val:.4g}_{COSMO_TYPE}"
                  f"_{PRIOR_TYPE}_{NL_TYPE}{_filter_tag()}_nTrain{N_TRAIN}_all.pdf")
@@ -437,21 +437,32 @@ _PARAM_LABELS = [
     r'$\Omega_m$', r"$w_0$", r"$w_0+w_a$",
 ]
 
+_PARAM_LABELS_7 = [
+    r'$10^9 A_s$', r'$n_s$', r'$H_0$', r'$\Omega_b$',
+    r'$\Omega_m$', r"$w_0$", r"$w_0+w_a$",
+]
+_PARAM_LABELS_9 = _PARAM_LABELS_7 + [r'$m_\nu$', r'$\log T_{\rm AGN}$']
+
+
 
 def plot_error_triangle(errors, lhs_clean, iz, z_val):
     import matplotlib.colors as mcolors
     import matplotlib.cm as mcm
 
+    n_params = min(lhs_clean.shape[1], 9)
+    labels   = (_PARAM_LABELS_9 if n_params > 7 else _PARAM_LABELS_7)[:n_params]
+
+
     ref_cosmo = np.array([2.1, 0.96605, 67.32, 0.04, 0.3, -0.9, -0.9])
     mean_abs_err = np.mean(np.abs(errors), axis=1)
-    n_params = lhs_clean.shape[1]
-    labels   = _PARAM_LABELS[:n_params]
+    # n_params = lhs_clean.shape[1]
+    # labels   = _PARAM_LABELS[:n_params]
 
     vmin, vmax = mean_abs_err.min(), mean_abs_err.max()
     use_log = (vmax / max(vmin, 1e-10)) > 10
     norm = (mcolors.LogNorm(vmin=max(vmin, 1e-6), vmax=vmax) if use_log
             else mcolors.Normalize(vmin=vmin, vmax=vmax))
-    cmap = mcm.get_cmap("YlOrRd")
+    cmap = mpl.colormaps["YlOrRd"]
 
     fig_size = 2.2 * n_params
     fig, axes = plt.subplots(n_params, n_params,
@@ -644,12 +655,12 @@ def main():
     print("[INFO] Computing predictions (all redshifts)...")
     pred_pks, syren_pks, true_pks, lhs_clean = compute_predictions(test_set)
 
-    syren_train = test_set.mps_approxes[valid]            # baseline used in training
+    syren_train = test_set.mps_approxes#[valid]            # baseline used in training
     base_diff = np.max(np.abs(syren_pks / syren_train - 1))
     print(f"[CHECK] max |syren(get_pks) / syren(training) - 1| = {base_diff:.2e}")   # expect ~1e-6
 
     pred_frac = pred_pks / syren_pks
-    true_frac = test_set.frac_pks[valid]
+    true_frac = test_set.frac_pks#[valid]
 
     # -----------------------------------------------------------------------
     # Per-redshift evaluation loop
